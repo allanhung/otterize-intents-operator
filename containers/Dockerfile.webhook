@@ -1,0 +1,23 @@
+ARG ARCH="amd64"
+ARG OS="linux"
+
+FROM golang:1.23 AS build
+ARG OIO_VERSIONTAG=2025.11.1200
+ENV CGO_ENABLED=0
+#ENV CI=dev
+RUN apt-get update && apt-get install -y patch
+RUN mkdir -p /go/src/github.com/otterize
+RUN cd /go/src/github.com/otterize && git clone --depth 1 -b v${OIO_VERSIONTAG} https://github.com/allanhung/otterize-intents-operator intents-operator
+WORKDIR /go/src/github.com/otterize/intents-operator/src
+RUN go generate ./shared/...
+RUN go generate ./operator/...
+RUN go build -trimpath -a -o ../bin/manager webhookserver/main.go
+RUN echo -n v${OIO_VERSIONTAG} > /version
+
+FROM gcr.io/distroless/static:nonroot
+WORKDIR /
+COPY --from=build /go/src/github.com/otterize/intents-operator/bin/manager /manager
+COPY --from=build /version .
+USER 65532:65532
+
+ENTRYPOINT ["/main"]

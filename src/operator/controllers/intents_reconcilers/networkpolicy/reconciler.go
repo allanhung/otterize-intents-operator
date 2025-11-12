@@ -305,6 +305,11 @@ func (r *Reconciler) setNetworkPolicyOwnerReferenceIfNeeded(ctx context.Context,
 	svc := corev1.Service{}
 	err := r.Get(ctx, types.NamespacedName{Name: ep.Service.Name, Namespace: ep.Service.Namespace}, &svc)
 	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			// Service does not exist, possibly deleted - skip setting owner reference
+			// This is expected during cleanup when the service has been deleted before the ClientIntents
+			return nil
+		}
 		return errors.Wrap(err)
 	}
 	return errors.Wrap(controllerutil.SetOwnerReference(&svc, netpol, r.Scheme))
