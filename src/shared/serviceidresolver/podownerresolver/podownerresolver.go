@@ -3,6 +3,7 @@ package podownerresolver
 import (
 	"context"
 	"flag"
+	"fmt"
 	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/otterize/intents-operator/src/shared/errors"
 	"github.com/otterize/intents-operator/src/shared/serviceidresolver/serviceidentity"
@@ -112,6 +113,32 @@ func resolvePodToServiceIdentity(ctx context.Context, k8sClient client.Client, p
 	otterizeServiceName := strings.ReplaceAll(resourceName, ".", "_")
 
 	ownerKind := ownerObj.GetObjectKind().GroupVersionKind().Kind
+	ownerApiVersion := ownerObj.GetObjectKind().GroupVersionKind().Group
+	// Defensively extract the first part of the group if it contains a version separator
+	if strings.Contains(ownerApiVersion, "/") {
+		ownerApiVersion = strings.Split(ownerApiVersion, "/")[0]
+	}
+
+	// Apply special service name mappings for specific workload types.
+	// These standardized names provide consistent identity across different instances of these workload types.
+	switch ownerKind {
+	case "Workflow":
+		// Argo Workflow pods get a standardized name for consistent policy application
+		// across different workflow instances
+		otterizeServiceName = "argo-workflow"
+	case "SparkApplication":
+		// Spark application pods (driver and executors) get a standardized name
+		// to group them under a common service identity
+		otterizeServiceName = "spark"
+	case "RunnerDeployment":
+		// GitHub Actions runner pods get a standardized name for consistent
+		// policy management across runner instances
+		otterizeServiceName = "actions-runner"
+	case "Service":
+		// Service owners need API group qualification to distinguish them from core Services
+		// and prevent naming conflicts with other resource types
+		ownerKind = fmt.Sprintf("%s.%s", ownerKind, ownerApiVersion)
+	}
 	return serviceidentity.ServiceIdentity{Name: otterizeServiceName, Namespace: pod.Namespace, OwnerObject: ownerObj, Kind: ownerKind, ResolvedUsingOverrideAnnotation: lo.ToPtr(false)}, nil
 }
 
