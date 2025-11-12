@@ -73,6 +73,14 @@ func (g *Group) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, e
 		return ctrl.Result{}, nil
 	}
 
+	// Log deletion status immediately after getting the resource
+	deletionTimestamp := resourceObject.GetDeletionTimestamp()
+	if deletionTimestamp != nil {
+		logrus.Infof("DELETION DETECTED: Resource %s/%s is being deleted (deletionTimestamp: %v)", req.Namespace, req.Name, deletionTimestamp)
+	} else {
+		logrus.Debugf("Resource %s/%s is NOT being deleted (no deletionTimestamp)", req.Namespace, req.Name)
+	}
+
 	err = g.ensureFinalizer(ctx, resourceObject)
 	if err != nil {
 		if isKubernetesRaceRelatedError(err) {
@@ -90,6 +98,9 @@ func (g *Group) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, e
 	}
 
 	objectBeingDeleted := resourceObject.GetDeletionTimestamp() != nil
+	if objectBeingDeleted {
+		logrus.Infof("BEFORE runGroup: Resource %s/%s has deletionTimestamp, will proceed with reconciliation then remove finalizer", req.Namespace, req.Name)
+	}
 
 	finalRes, finalErr = g.runGroup(ctx, req, finalErr, finalRes)
 
@@ -98,6 +109,7 @@ func (g *Group) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, e
 	// when patching network policies), and shouldn't block deletion of this resource.
 	// The individual reconcilers should handle cleanup gracefully (e.g., treating NotFound as success).
 	if objectBeingDeleted {
+		logrus.Infof("AFTER runGroup: Attempting to remove finalizer for %s/%s (finalErr: %v, finalRes.IsZero: %v)", req.Namespace, req.Name, finalErr, finalRes.IsZero())
 		if finalErr != nil {
 			// Log the error but continue with finalizer removal
 			logrus.WithError(finalErr).Warnf("Errors occurred during deletion reconciliation of %s/%s, attempting to remove finalizer anyway", req.Namespace, req.Name)
@@ -155,12 +167,16 @@ func (g *Group) ensureFinalizer(ctx context.Context, resource client.Object) err
 }
 
 func (g *Group) removeFinalizer(ctx context.Context, resource client.Object) error {
+	logrus.Infof("removeFinalizer CALLED: Removing finalizer %s from resource %s/%s", g.finalizer, resource.GetNamespace(), resource.GetName())
 	controllerutil.RemoveFinalizer(resource, g.finalizer)
+	logrus.Infof("removeFinalizer: Calling client.Update to persist finalizer removal for %s/%s", resource.GetNamespace(), resource.GetName())
 	err := g.client.Update(ctx, resource)
 	if err != nil {
+		logrus.WithError(err).Errorf("removeFinalizer FAILED: Could not update resource %s/%s", resource.GetNamespace(), resource.GetName())
 		return errors.Errorf("failed to remove finalizer: %w", err)
 	}
 
+	logrus.Infof("removeFinalizer SUCCESS: Finalizer removed from %s/%s", resource.GetNamespace(), resource.GetName())
 	return nil
 }
 
