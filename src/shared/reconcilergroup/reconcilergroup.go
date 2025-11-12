@@ -89,10 +89,24 @@ func (g *Group) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, e
 		return ctrl.Result{}, errors.Wrap(err)
 	}
 
+	objectBeingDeleted := resourceObject.GetDeletionTimestamp() != nil
+
 	finalRes, finalErr = g.runGroup(ctx, req, finalErr, finalRes)
 
-	objectBeingDeleted := resourceObject.GetDeletionTimestamp() != nil
-	if objectBeingDeleted && finalErr == nil && finalRes.IsZero() {
+	// When object is being deleted, we should try to remove finalizer even if there were errors
+	// during reconciliation. The errors might be from processing other resources (e.g., timeout
+	// when patching network policies), and shouldn't block deletion of this resource.
+	// The individual reconcilers should handle cleanup gracefully (e.g., treating NotFound as success).
+	if objectBeingDeleted {
+		if finalErr != nil {
+			// Log the error but continue with finalizer removal
+			logrus.WithError(finalErr).Warnf("Errors occurred during deletion reconciliation of %s/%s, attempting to remove finalizer anyway", req.Namespace, req.Name)
+		}
+		if !finalRes.IsZero() {
+			// Requeue was requested, but we still try to remove finalizer
+			logrus.Debugf("Requeue requested for deleting resource %s/%s, attempting to remove finalizer anyway", req.Namespace, req.Name)
+		}
+
 		err = g.removeFinalizer(ctx, resourceObject)
 		if err != nil {
 			if isKubernetesRaceRelatedError(err) {
@@ -100,6 +114,10 @@ func (g *Group) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, e
 			}
 			return ctrl.Result{}, errors.Wrap(err)
 		}
+
+		// Successfully removed finalizer, resource can now be deleted by Kubernetes
+		logrus.Debugf("Successfully removed finalizer for %s/%s", req.Namespace, req.Name)
+		return ctrl.Result{}, nil
 	}
 
 	return finalRes, finalErr
