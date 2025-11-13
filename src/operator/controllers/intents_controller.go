@@ -398,25 +398,20 @@ func (r *IntentsReconciler) InitProtectedServiceIndexField(mgr ctrl.Manager) err
 }
 
 func (r *IntentsReconciler) InitEndpointsPodNamesIndex(mgr ctrl.Manager) error {
+	// Index EndpointSlices by pod names they contain
 	err := mgr.GetCache().IndexField(
 		context.Background(),
-		&corev1.Endpoints{},
+		&discoveryv1.EndpointSlice{},
 		otterizev2alpha1.EndpointsPodNamesIndexField,
 		func(object client.Object) []string {
 			var res []string
-			endpoints := object.(*corev1.Endpoints)
-			addresses := make([]corev1.EndpointAddress, 0)
-			for _, subset := range endpoints.Subsets {
-				addresses = append(addresses, subset.Addresses...)
-				addresses = append(addresses, subset.NotReadyAddresses...)
-			}
+			endpointSlice := object.(*discoveryv1.EndpointSlice)
 
-			for _, address := range addresses {
-				if address.TargetRef == nil || address.TargetRef.Kind != "Pod" {
+			for _, endpoint := range endpointSlice.Endpoints {
+				if endpoint.TargetRef == nil || endpoint.TargetRef.Kind != "Pod" {
 					continue
 				}
-
-				res = append(res, address.TargetRef.Name)
+				res = append(res, endpoint.TargetRef.Name)
 			}
 
 			return res

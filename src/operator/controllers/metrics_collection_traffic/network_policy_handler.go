@@ -13,6 +13,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"golang.org/x/exp/slices"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	v1 "k8s.io/api/networking/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -401,10 +402,10 @@ func (r *NetworkPolicyHandler) getAllApplicableNetworkPolicies(ctx context.Conte
 	netpolSlice = append(netpolSlice, netpolList.Items...)
 
 	// Get policies which were created by intents targeting this pod by its service
-	endpointsList := &corev1.EndpointsList{}
+	endpointSliceList := &discoveryv1.EndpointSliceList{}
 	err = r.client.List(
 		ctx,
-		endpointsList,
+		endpointSliceList,
 		&client.MatchingFields{v2alpha1.EndpointsPodNamesIndexField: pod.Name},
 		&client.ListOptions{Namespace: pod.Namespace},
 	)
@@ -412,8 +413,17 @@ func (r *NetworkPolicyHandler) getAllApplicableNetworkPolicies(ctx context.Conte
 		return make([]v1.NetworkPolicy, 0), errors.Wrap(err)
 	}
 
-	for _, endpoint := range endpointsList.Items {
-		err = r.client.List(ctx, netpolList, client.MatchingLabels{v2alpha1.OtterizeNetworkPolicy: (&serviceidentity.ServiceIdentity{Name: endpoint.Name, Namespace: pod.Namespace, Kind: serviceidentity.KindService}).GetFormattedOtterizeIdentityWithKind()})
+	// Collect unique service names from EndpointSlices
+	serviceNames := make(map[string]bool)
+	for _, endpointSlice := range endpointSliceList.Items {
+		if serviceName, ok := endpointSlice.Labels[discoveryv1.LabelServiceName]; ok {
+			serviceNames[serviceName] = true
+		}
+	}
+
+	// Query network policies for each unique service
+	for serviceName := range serviceNames {
+		err = r.client.List(ctx, netpolList, client.MatchingLabels{v2alpha1.OtterizeNetworkPolicy: (&serviceidentity.ServiceIdentity{Name: serviceName, Namespace: pod.Namespace, Kind: serviceidentity.KindService}).GetFormattedOtterizeIdentityWithKind()})
 		if err != nil {
 			return make([]v1.NetworkPolicy, 0), errors.Wrap(err)
 		}

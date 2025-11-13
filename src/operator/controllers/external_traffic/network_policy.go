@@ -13,6 +13,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"golang.org/x/exp/slices"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	v1 "k8s.io/api/networking/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -311,11 +312,11 @@ func (r *NetworkPolicyHandler) handlePodList(ctx context.Context, podList *corev
 }
 
 func (r *NetworkPolicyHandler) handlePod(ctx context.Context, pod *corev1.Pod) error {
-	var endpointsList corev1.EndpointsList
+	var endpointSliceList discoveryv1.EndpointSliceList
 
 	err := r.client.List(
 		ctx,
-		&endpointsList,
+		&endpointSliceList,
 		&client.MatchingFields{v2alpha1.EndpointsPodNamesIndexField: pod.Name},
 		&client.ListOptions{Namespace: pod.Namespace},
 	)
@@ -323,8 +324,28 @@ func (r *NetworkPolicyHandler) handlePod(ctx context.Context, pod *corev1.Pod) e
 	if err != nil {
 		return errors.Wrap(err)
 	}
-	for _, endpoints := range endpointsList.Items {
-		if err := r.HandleEndpoints(ctx, &endpoints); err != nil {
+
+	// Collect unique service names from EndpointSlices
+	serviceNames := make(map[string]bool)
+	for _, endpointSlice := range endpointSliceList.Items {
+		if serviceName, ok := endpointSlice.Labels[discoveryv1.LabelServiceName]; ok {
+			serviceNames[serviceName] = true
+		}
+	}
+
+	// Handle endpoints for each unique service
+	for serviceName := range serviceNames {
+		endpoints := &corev1.Endpoints{}
+		err := r.client.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: pod.Namespace}, endpoints)
+		if err != nil {
+			if k8serrors.IsNotFound(err) {
+				// Endpoints doesn't exist, skip
+				continue
+			}
+			return errors.Wrap(err)
+		}
+
+		if err := r.HandleEndpoints(ctx, endpoints); err != nil {
 			return errors.Wrap(err)
 		}
 	}
