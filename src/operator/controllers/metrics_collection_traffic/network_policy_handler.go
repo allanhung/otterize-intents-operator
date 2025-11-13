@@ -13,6 +13,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"golang.org/x/exp/slices"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	v1 "k8s.io/api/networking/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -125,29 +126,40 @@ func (r *NetworkPolicyHandler) HandleAllServicesInNamespace(ctx context.Context,
 
 	pods := make([]PotentiallyScrapeMetricPod, 0)
 	for _, service := range serviceList.Items {
-		endpoints := &corev1.Endpoints{}
-		err = r.client.Get(ctx, client.ObjectKey{Namespace: service.Namespace, Name: service.Name}, endpoints)
-		if k8serrors.IsNotFound(err) {
+		// List EndpointSlices for the service
+		endpointSliceList := &discoveryv1.EndpointSliceList{}
+		err = r.client.List(ctx, endpointSliceList,
+			client.InNamespace(service.Namespace),
+			client.MatchingLabels{discoveryv1.LabelServiceName: service.Name})
+		if err != nil {
+			return errors.Wrap(err)
+		}
+
+		if len(endpointSliceList.Items) == 0 {
 			continue
 		}
 
+		// Get pods from EndpointSlices
+		endpointsPods, err := r.getEndpointSlicesPods(ctx, endpointSliceList.Items)
 		if err != nil {
 			return errors.Wrap(err)
 		}
 
-		endpointsPods, err := r.getEndpointsPods(ctx, endpoints)
-		if err != nil {
-			return errors.Wrap(err)
+		// Extract ports from EndpointSlices
+		scrapeResourcePorts := make([]int32, 0)
+		portSet := make(map[int32]bool)
+		for _, endpointSlice := range endpointSliceList.Items {
+			for _, port := range endpointSlice.Ports {
+				if port.Port != nil {
+					if !portSet[*port.Port] {
+						portSet[*port.Port] = true
+						scrapeResourcePorts = append(scrapeResourcePorts, *port.Port)
+					}
+				}
+			}
 		}
 
 		podsFromService := lo.Map(endpointsPods, func(item corev1.Pod, _ int) PotentiallyScrapeMetricPod {
-			scrapeResourcePorts := make([]int32, 0)
-			lo.ForEach(endpoints.Subsets, func(endpointsSubset corev1.EndpointSubset, _ int) {
-				lo.ForEach(endpointsSubset.Ports, func(port corev1.EndpointPort, _ int) {
-					scrapeResourcePorts = append(scrapeResourcePorts, port.Port)
-				})
-			})
-
 			return PotentiallyScrapeMetricPod{pod: &item,
 				scrapeResourceMeta:  &service.ObjectMeta,
 				scrapeResourceType:  &service.TypeMeta,
@@ -401,10 +413,10 @@ func (r *NetworkPolicyHandler) getAllApplicableNetworkPolicies(ctx context.Conte
 	netpolSlice = append(netpolSlice, netpolList.Items...)
 
 	// Get policies which were created by intents targeting this pod by its service
-	endpointsList := &corev1.EndpointsList{}
+	endpointSliceList := &discoveryv1.EndpointSliceList{}
 	err = r.client.List(
 		ctx,
-		endpointsList,
+		endpointSliceList,
 		&client.MatchingFields{v2alpha1.EndpointsPodNamesIndexField: pod.Name},
 		&client.ListOptions{Namespace: pod.Namespace},
 	)
@@ -412,8 +424,17 @@ func (r *NetworkPolicyHandler) getAllApplicableNetworkPolicies(ctx context.Conte
 		return make([]v1.NetworkPolicy, 0), errors.Wrap(err)
 	}
 
-	for _, endpoint := range endpointsList.Items {
-		err = r.client.List(ctx, netpolList, client.MatchingLabels{v2alpha1.OtterizeNetworkPolicy: (&serviceidentity.ServiceIdentity{Name: endpoint.Name, Namespace: pod.Namespace, Kind: serviceidentity.KindService}).GetFormattedOtterizeIdentityWithKind()})
+	// Collect unique service names from EndpointSlices
+	serviceNames := make(map[string]bool)
+	for _, endpointSlice := range endpointSliceList.Items {
+		if serviceName, ok := endpointSlice.Labels[discoveryv1.LabelServiceName]; ok {
+			serviceNames[serviceName] = true
+		}
+	}
+
+	// Query network policies for each unique service
+	for serviceName := range serviceNames {
+		err = r.client.List(ctx, netpolList, client.MatchingLabels{v2alpha1.OtterizeNetworkPolicy: (&serviceidentity.ServiceIdentity{Name: serviceName, Namespace: pod.Namespace, Kind: serviceidentity.KindService}).GetFormattedOtterizeIdentityWithKind()})
 		if err != nil {
 			return make([]v1.NetworkPolicy, 0), errors.Wrap(err)
 		}
@@ -625,6 +646,39 @@ func (r *NetworkPolicyHandler) getAllServicesInNamespace(ctx context.Context, na
 	}
 
 	return serviceList, nil
+}
+
+// getEndpointSlicesPods extracts pods from EndpointSlices
+func (r *NetworkPolicyHandler) getEndpointSlicesPods(ctx context.Context, endpointSlices []discoveryv1.EndpointSlice) ([]corev1.Pod, error) {
+	pods := make([]corev1.Pod, 0)
+	podNames := make(map[string]bool) // to deduplicate
+
+	for _, endpointSlice := range endpointSlices {
+		for _, endpoint := range endpointSlice.Endpoints {
+			if endpoint.TargetRef == nil || endpoint.TargetRef.Kind != "Pod" {
+				continue
+			}
+
+			podKey := endpoint.TargetRef.Namespace + "/" + endpoint.TargetRef.Name
+			if podNames[podKey] {
+				continue
+			}
+			podNames[podKey] = true
+
+			pod := &corev1.Pod{}
+			err := r.client.Get(ctx, types.NamespacedName{Name: endpoint.TargetRef.Name, Namespace: endpoint.TargetRef.Namespace}, pod)
+			if k8serrors.IsNotFound(err) {
+				continue
+			}
+			if err != nil {
+				return nil, errors.Wrap(err)
+			}
+
+			pods = append(pods, *pod)
+		}
+	}
+
+	return pods, nil
 }
 
 func (r *NetworkPolicyHandler) getEndpointsPods(ctx context.Context, endpoints *corev1.Endpoints) ([]corev1.Pod, error) {

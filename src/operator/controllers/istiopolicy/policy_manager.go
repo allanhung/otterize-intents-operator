@@ -87,7 +87,7 @@ func (c *PolicyManagerImpl) DeleteAll(
 
 	for _, policy := range existingPolicies.Items {
 		err = c.client.Delete(ctx, policy)
-		if err != nil {
+		if client.IgnoreNotFound(err) != nil {
 			return errors.Wrap(err)
 		}
 	}
@@ -110,13 +110,13 @@ func (c *PolicyManagerImpl) RemoveDeprecatedPoliciesForClient(
 	err := c.client.List(ctx,
 		&existingPolicies,
 		client.MatchingLabels{v2alpha1.OtterizeIstioClientAnnotationKeyDeprecated: clientFormattedIdentity})
-	if err != nil {
+	if client.IgnoreNotFound(err) != nil {
 		return errors.Wrap(err)
 	}
 
 	for _, policy := range existingPolicies.Items {
 		err = c.client.Delete(ctx, policy)
-		if err != nil {
+		if client.IgnoreNotFound(err) != nil {
 			return errors.Wrap(err)
 		}
 	}

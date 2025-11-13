@@ -10,6 +10,7 @@ import (
 	"github.com/otterize/intents-operator/src/shared/injectablerecorder"
 	"github.com/otterize/intents-operator/src/shared/serviceidresolver/serviceidentity"
 	"github.com/samber/lo"
+	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/networking/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -97,7 +98,10 @@ func (r *PortNetworkPolicyReconciler) Build(ctx context.Context, ep effectivepol
 		return nil, errors.Wrap(err)
 	}
 	if svc.Spec.Selector == nil {
-		return nil, errors.Errorf("service %s/%s has no selector", svc.Namespace, svc.Name)
+		// Services without selectors (e.g., ExternalName services, headless services)
+		// don't route to pods, so no network policy rules are needed
+		logrus.Debugf("Service %s/%s has no selector (type: %s), skipping network policy creation", svc.Namespace, svc.Name, svc.Spec.Type)
+		return make([]v1.NetworkPolicyIngressRule, 0), nil
 	}
 	return r.buildIngressRulesFromEffectivePolicy(ep, &svc), nil
 }

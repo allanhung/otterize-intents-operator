@@ -123,6 +123,11 @@ func (r *PodLabelReconciler) removeLabelsFromPods(
 		prometheus.IncrementPodsUnlabeledForNetworkPolicies(1)
 		err := r.Patch(ctx, updatedPod, client.MergeFrom(&pod))
 		if err != nil {
+			if k8serrors.IsNotFound(err) {
+				// Pod was deleted between listing and patching - this is fine, cleanup goal achieved
+				logrus.Debugf("Pod %s/%s no longer exists, skipping label removal", pod.Namespace, pod.Name)
+				continue
+			}
 			return errors.Wrap(err)
 		}
 	}

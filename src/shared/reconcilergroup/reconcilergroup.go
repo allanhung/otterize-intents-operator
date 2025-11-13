@@ -73,6 +73,12 @@ func (g *Group) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, e
 		return ctrl.Result{}, nil
 	}
 
+	// Log deletion status immediately after getting the resource
+	deletionTimestamp := resourceObject.GetDeletionTimestamp()
+	if deletionTimestamp != nil {
+		logrus.Debugf("Resource %s/%s is being deleted (deletionTimestamp: %v)", req.Namespace, req.Name, deletionTimestamp)
+	}
+
 	err = g.ensureFinalizer(ctx, resourceObject)
 	if err != nil {
 		if isKubernetesRaceRelatedError(err) {
@@ -89,10 +95,25 @@ func (g *Group) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, e
 		return ctrl.Result{}, errors.Wrap(err)
 	}
 
+	objectBeingDeleted := resourceObject.GetDeletionTimestamp() != nil
+
 	finalRes, finalErr = g.runGroup(ctx, req, finalErr, finalRes)
 
-	objectBeingDeleted := resourceObject.GetDeletionTimestamp() != nil
-	if objectBeingDeleted && finalErr == nil && finalRes.IsZero() {
+	// When object is being deleted, we should try to remove finalizer even if there were errors
+	// during reconciliation. The errors might be from processing other resources (e.g., timeout
+	// when patching network policies), and shouldn't block deletion of this resource.
+	// The individual reconcilers should handle cleanup gracefully (e.g., treating NotFound as success).
+	if objectBeingDeleted {
+		logrus.Debugf("Attempting to remove finalizer for deleting resource %s/%s", req.Namespace, req.Name)
+		if finalErr != nil {
+			// Log the error but continue with finalizer removal
+			logrus.WithError(finalErr).Warnf("Errors occurred during deletion reconciliation of %s/%s, attempting to remove finalizer anyway", req.Namespace, req.Name)
+		}
+		if !finalRes.IsZero() {
+			// Requeue was requested, but we still try to remove finalizer
+			logrus.Debugf("Requeue requested for deleting resource %s/%s, attempting to remove finalizer anyway", req.Namespace, req.Name)
+		}
+
 		err = g.removeFinalizer(ctx, resourceObject)
 		if err != nil {
 			if isKubernetesRaceRelatedError(err) {
@@ -100,6 +121,8 @@ func (g *Group) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, e
 			}
 			return ctrl.Result{}, errors.Wrap(err)
 		}
+
+		return ctrl.Result{}, nil
 	}
 
 	return finalRes, finalErr
@@ -137,12 +160,15 @@ func (g *Group) ensureFinalizer(ctx context.Context, resource client.Object) err
 }
 
 func (g *Group) removeFinalizer(ctx context.Context, resource client.Object) error {
+	logrus.Debugf("Removing finalizer %s from resource %s/%s", g.finalizer, resource.GetNamespace(), resource.GetName())
 	controllerutil.RemoveFinalizer(resource, g.finalizer)
 	err := g.client.Update(ctx, resource)
 	if err != nil {
+		logrus.WithError(err).Errorf("Failed to remove finalizer from resource %s/%s", resource.GetNamespace(), resource.GetName())
 		return errors.Errorf("failed to remove finalizer: %w", err)
 	}
 
+	logrus.Infof("Successfully removed finalizer from %s/%s", resource.GetNamespace(), resource.GetName())
 	return nil
 }
 

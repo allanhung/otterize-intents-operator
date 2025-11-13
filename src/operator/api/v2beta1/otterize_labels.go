@@ -2,7 +2,6 @@ package v2beta1
 
 import (
 	"context"
-	"fmt"
 	"github.com/otterize/intents-operator/src/shared/errors"
 	"github.com/otterize/intents-operator/src/shared/serviceidresolver/serviceidentity"
 	"golang.org/x/exp/maps"
@@ -116,12 +115,9 @@ func ServiceIdentityToLabelsForWorkloadSelection(ctx context.Context, k8sClient 
 			return nil, false, errors.Wrap(err)
 		}
 		if svc.Spec.Selector == nil {
-			// ExternalName services don't have selectors as they redirect to external DNS names.
-			// These services don't select any pods, so we return gracefully without error.
-			if svc.Spec.Type == v1.ServiceTypeExternalName {
-				return nil, false, nil
-			}
-			return nil, false, fmt.Errorf("service %s/%s has no selector", svc.Namespace, svc.Name)
+			// Services without selectors (e.g., ExternalName services) don't select pods
+			// Return false to indicate no labels available, similar to NotFound case
+			return nil, false, nil
 		}
 		return maps.Clone(svc.Spec.Selector), true, nil
 	}

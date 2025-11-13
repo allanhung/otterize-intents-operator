@@ -144,6 +144,10 @@ func (r *IAMIntentsReconciler) hasMultipleClientsForServiceAccount(ctx context.C
 	}
 
 	intentsWithSameTypeInSameNamespace := lo.Filter(intents.Items, func(intent otterizev2alpha1.ClientIntents, _ int) bool {
+		// Skip intents that are being deleted to avoid "pod not found" errors
+		if intent.DeletionTimestamp != nil {
+			return false
+		}
 		return len(intent.GetFilteredTargetList(intentType)) != 0
 	})
 
