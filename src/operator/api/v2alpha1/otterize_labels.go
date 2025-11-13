@@ -2,7 +2,6 @@ package v2alpha1
 
 import (
 	"context"
-	"fmt"
 	"github.com/otterize/intents-operator/src/shared/errors"
 	"github.com/otterize/intents-operator/src/shared/serviceidresolver/serviceidentity"
 	"golang.org/x/exp/maps"
