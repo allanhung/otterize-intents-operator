@@ -6,7 +6,6 @@ import (
 	"github.com/otterize/intents-operator/src/shared/injectablerecorder"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
-	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -45,18 +44,8 @@ func (r *ServiceReconciler) InjectRecorder(recorder record.EventRecorder) {
 }
 
 func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	endpoints := &corev1.Endpoints{}
-	err := r.Get(ctx, req.NamespacedName, endpoints)
-	if k8serrors.IsNotFound(err) {
-		// delete is handled by garbage collection - the service owns the network policy
-		return ctrl.Result{}, nil
-	}
-
-	if err != nil {
-		return ctrl.Result{}, errors.Wrap(err)
-	}
-
-	err = r.extNetpolHandler.HandleEndpoints(ctx, endpoints)
+	// Handle the service by name using EndpointSlice API
+	err := r.extNetpolHandler.HandleServiceByName(ctx, req.Name, req.Namespace)
 	if err != nil {
 		return ctrl.Result{}, errors.Wrap(err)
 	}

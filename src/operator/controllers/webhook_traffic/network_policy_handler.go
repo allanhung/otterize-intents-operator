@@ -14,6 +14,7 @@ import (
 	"golang.org/x/exp/slices"
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	v1 "k8s.io/api/networking/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -192,16 +193,20 @@ func (n *NetworkPolicyHandler) reduceWebhooksNetpols(ctx context.Context, webhoo
 }
 
 func (n *NetworkPolicyHandler) isServiceBlockedByOtterize(ctx context.Context, service *corev1.Service) (bool, error) {
-	endpoints := &corev1.Endpoints{}
-	err := n.client.Get(ctx, types.NamespacedName{Namespace: service.Namespace, Name: service.Name}, endpoints)
-	if err != nil && k8serrors.IsNotFound(err) {
-		return false, nil
-	}
+	// List EndpointSlices for the service
+	endpointSliceList := &discoveryv1.EndpointSliceList{}
+	err := n.client.List(ctx, endpointSliceList,
+		client.InNamespace(service.Namespace),
+		client.MatchingLabels{discoveryv1.LabelServiceName: service.Name})
 	if err != nil {
 		return false, errors.Wrap(err)
 	}
 
-	endpointsAddresses := n.getAddressesFromEndpoints(endpoints)
+	if len(endpointSliceList.Items) == 0 {
+		return false, nil
+	}
+
+	endpointsAddresses := n.getAddressesFromEndpointSlices(endpointSliceList.Items)
 
 	for _, address := range endpointsAddresses {
 		pod, err := n.getAffectedPod(ctx, address)
@@ -241,7 +246,7 @@ func (n *NetworkPolicyHandler) isServiceBlockedByOtterize(ctx context.Context, s
 		netpolsAffectingThisWorkload = append(netpolsAffectingThisWorkload, netpolList.Items...)
 
 		// Get netpolsAffectingThisWorkload which was created by intents targeting this pod by its service
-		err = n.client.List(ctx, netpolList, client.MatchingLabels{v2alpha1.OtterizeNetworkPolicy: (&serviceidentity.ServiceIdentity{Name: endpoints.Name, Namespace: endpoints.Namespace, Kind: serviceidentity.KindService}).GetFormattedOtterizeIdentityWithKind()})
+		err = n.client.List(ctx, netpolList, client.MatchingLabels{v2alpha1.OtterizeNetworkPolicy: (&serviceidentity.ServiceIdentity{Name: service.Name, Namespace: service.Namespace, Kind: serviceidentity.KindService}).GetFormattedOtterizeIdentityWithKind()})
 		if err != nil {
 			return false, errors.Wrap(err)
 		}
@@ -271,6 +276,23 @@ func (n *NetworkPolicyHandler) getAffectedPod(ctx context.Context, address corev
 	}
 
 	return pod, nil
+}
+
+// getAddressesFromEndpointSlices converts EndpointSlice list to EndpointAddress list
+func (n *NetworkPolicyHandler) getAddressesFromEndpointSlices(endpointSlices []discoveryv1.EndpointSlice) []corev1.EndpointAddress {
+	addresses := make([]corev1.EndpointAddress, 0)
+	for _, endpointSlice := range endpointSlices {
+		for _, endpoint := range endpointSlice.Endpoints {
+			for _, address := range endpoint.Addresses {
+				addr := corev1.EndpointAddress{
+					IP:        address,
+					TargetRef: endpoint.TargetRef,
+				}
+				addresses = append(addresses, addr)
+			}
+		}
+	}
+	return addresses
 }
 
 func (n *NetworkPolicyHandler) getAddressesFromEndpoints(endpoints *corev1.Endpoints) []corev1.EndpointAddress {
@@ -442,17 +464,22 @@ func (n *NetworkPolicyHandler) getControlPlaneIPsAsCIDR(ctx context.Context) ([]
 		}
 	}
 
-	var endpoints corev1.Endpoints
-	err = n.client.Get(ctx, types.NamespacedName{Name: svc.Name, Namespace: svc.Namespace}, &endpoints)
+	// List EndpointSlices for the kubernetes service
+	endpointSliceList := &discoveryv1.EndpointSliceList{}
+	err = n.client.List(ctx, endpointSliceList,
+		client.InNamespace(svc.Namespace),
+		client.MatchingLabels{discoveryv1.LabelServiceName: svc.Name})
 	if err != nil {
 		return make([]string, 0), errors.Wrap(err)
 	}
 
-	for _, subset := range endpoints.Subsets {
-		for _, endpointAddress := range subset.Addresses {
-			ip, isIP := n.ipAddressToCIDR(endpointAddress.IP)
-			if isIP {
-				addresses = append(addresses, ip)
+	for _, endpointSlice := range endpointSliceList.Items {
+		for _, endpoint := range endpointSlice.Endpoints {
+			for _, address := range endpoint.Addresses {
+				ip, isIP := n.ipAddressToCIDR(address)
+				if isIP {
+					addresses = append(addresses, ip)
+				}
 			}
 		}
 	}

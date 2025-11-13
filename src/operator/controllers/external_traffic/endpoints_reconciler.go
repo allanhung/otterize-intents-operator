@@ -6,11 +6,9 @@ import (
 	"github.com/otterize/intents-operator/src/shared/errors"
 	"github.com/otterize/intents-operator/src/shared/injectablerecorder"
 	"github.com/samber/lo"
-	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	v1 "k8s.io/api/networking/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -76,18 +74,8 @@ func (r *EndpointsReconcilerImpl) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
-	// Fetch the corresponding Endpoints object for compatibility with HandleEndpoints
-	endpoints := &corev1.Endpoints{}
-	err = r.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: req.Namespace}, endpoints)
-	if err != nil {
-		// If Endpoints doesn't exist, skip (service may not have traditional endpoints)
-		if k8serrors.IsNotFound(err) {
-			return ctrl.Result{}, nil
-		}
-		return ctrl.Result{}, errors.Wrap(err)
-	}
-
-	err = r.extNetpolHandler.HandleEndpoints(ctx, endpoints)
+	// Handle the service by name using EndpointSlice API
+	err = r.extNetpolHandler.HandleServiceByName(ctx, serviceName, req.Namespace)
 
 	if err != nil {
 		return ctrl.Result{}, errors.Wrap(err)
