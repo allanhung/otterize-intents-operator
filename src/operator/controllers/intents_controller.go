@@ -33,6 +33,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -170,7 +171,7 @@ func (r *IntentsReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&otterizev2alpha1.ClientIntents{}).
 		WithOptions(controller.Options{RecoverPanic: lo.ToPtr(true)}).
 		Watches(&otterizev2alpha1.ProtectedService{}, handler.EnqueueRequestsFromMapFunc(r.mapProtectedServiceToClientIntents)).
-		Watches(&corev1.Endpoints{}, handler.EnqueueRequestsFromMapFunc(r.watchApiServerEndpoint)).
+		Watches(&discoveryv1.EndpointSlice{}, handler.EnqueueRequestsFromMapFunc(r.watchApiServerEndpointSlice)).
 		Watches(&otterizev2alpha1.PostgreSQLServerConfig{}, handler.EnqueueRequestsFromMapFunc(r.mapPostgresInstanceNameToDatabaseIntents)).
 		Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(r.mapPodWithAccessAnnotationToClientIntents)).
 		Complete(r)
@@ -207,6 +208,28 @@ func (r *IntentsReconciler) mapPodWithAccessAnnotationToClientIntents(ctx contex
 	return requests
 }
 
+// watchApiServerEndpointSlice watches for changes to Kubernetes API server EndpointSlices
+// and triggers reconciliation of ClientIntents that target the API server
+func (r *IntentsReconciler) watchApiServerEndpointSlice(ctx context.Context, obj client.Object) []reconcile.Request {
+	endpointSlice := obj.(*discoveryv1.EndpointSlice)
+
+	// Check if this EndpointSlice belongs to the Kubernetes API server service
+	if endpointSlice.GetNamespace() != otterizev2alpha1.KubernetesAPIServerNamespace {
+		return nil
+	}
+
+	// EndpointSlices are labeled with kubernetes.io/service-name
+	serviceName, ok := endpointSlice.Labels[discoveryv1.LabelServiceName]
+	if !ok || serviceName != otterizev2alpha1.KubernetesAPIServerName {
+		return nil
+	}
+
+	intentsToReconcile := r.getIntentsToAPIServerService(ctx)
+	return r.mapIntentsToRequests(intentsToReconcile)
+}
+
+// watchApiServerEndpoint is deprecated, kept for backwards compatibility
+// Use watchApiServerEndpointSlice instead
 func (r *IntentsReconciler) watchApiServerEndpoint(ctx context.Context, obj client.Object) []reconcile.Request {
 	if obj.GetNamespace() != otterizev2alpha1.KubernetesAPIServerNamespace || obj.GetName() != otterizev2alpha1.KubernetesAPIServerName {
 		return nil
