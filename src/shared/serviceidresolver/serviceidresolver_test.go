@@ -519,6 +519,46 @@ func (s *ServiceIdResolverTestSuite) TestServiceIdentityToPodLabelsForWorkloadSe
 	s.Require().Len(pods, 0)
 }
 
+func (s *ServiceIdResolverTestSuite) TestResolvePodToServiceIdentity_ExecutionOwner() {
+	podName := "execution-pod-12345"
+	podNamespace := "canalflow-namespace"
+	executionName := "my-execution"
+
+	myPod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName,
+			Namespace: podNamespace,
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					Kind:       "Execution",
+					Name:       executionName,
+					APIVersion: "canalflow.io/v1alpha1",
+				},
+			},
+		},
+	}
+
+	executionAsObject := unstructured.Unstructured{}
+	executionAsObject.SetName(executionName)
+	executionAsObject.SetNamespace(podNamespace)
+	executionAsObject.SetKind("Execution")
+	executionAsObject.SetAPIVersion("canalflow.io/v1alpha1")
+
+	emptyObject := &unstructured.Unstructured{}
+	emptyObject.SetKind("Execution")
+	emptyObject.SetAPIVersion("canalflow.io/v1alpha1")
+	s.Client.EXPECT().Get(gomock.Any(), types.NamespacedName{Name: executionName, Namespace: podNamespace}, emptyObject).Do(
+		func(_ context.Context, _ types.NamespacedName, obj *unstructured.Unstructured, _ ...any) error {
+			executionAsObject.DeepCopyInto(obj)
+			return nil
+		})
+
+	service, err := s.Resolver.ResolvePodToServiceIdentity(context.Background(), &myPod)
+	s.Require().NoError(err)
+	s.Require().Equal("execution", service.Name)
+	s.Require().Equal("Execution", service.Kind)
+}
+
 func (s *ServiceIdResolverTestSuite) TestResolvePodToServiceIdentity_WorkflowOwner() {
 	podName := "workflow-pod-12345"
 	podNamespace := "argo-namespace"
