@@ -122,6 +122,10 @@ func resolvePodToServiceIdentity(ctx context.Context, k8sClient client.Client, p
 	// Apply special service name mappings for specific workload types.
 	// These standardized names provide consistent identity across different instances of these workload types.
 	switch ownerKind {
+	case "Execution":
+		// Canalflow execution pods get a standardized name for consistent policy application
+		// across different execution instances
+		otterizeServiceName = "execution"
 	case "Workflow":
 		// Argo Workflow pods get a standardized name for consistent policy application
 		// across different workflow instances
