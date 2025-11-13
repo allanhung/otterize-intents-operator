@@ -494,6 +494,232 @@ func (s *ServiceIdResolverTestSuite) TestServiceIdentityToPodLabelsForWorkloadSe
 	s.Require().Len(pods, 0)
 }
 
+func (s *ServiceIdResolverTestSuite) TestServiceIdentityToPodLabelsForWorkloadSelection_ServiceKind_ExternalNameService() {
+	serviceName := "external-service"
+	namespace := "cool-namespace"
+	service := serviceidentity.ServiceIdentity{Name: serviceName, Namespace: namespace, Kind: serviceidentity.KindService}
+
+	// ExternalName services have no selector and should be handled gracefully
+	serviceObj := corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: serviceName, Namespace: namespace},
+		Spec: corev1.ServiceSpec{
+			Type:         corev1.ServiceTypeExternalName,
+			ExternalName: "external.example.com",
+			Selector:     nil, // ExternalName services have no selector
+		},
+	}
+	s.Client.EXPECT().Get(gomock.Any(), types.NamespacedName{Name: serviceName, Namespace: namespace}, &corev1.Service{}).Do(func(_ context.Context, name types.NamespacedName, svc *corev1.Service, _ ...any) {
+		serviceObj.DeepCopyInto(svc)
+	})
+
+	// Should return no pods with ok=false and no error for ExternalName services
+	pods, ok, err := s.Resolver.ResolveServiceIdentityToPodSlice(context.Background(), service)
+	s.Require().NoError(err)
+	s.Require().False(ok)
+	s.Require().Len(pods, 0)
+}
+
+func (s *ServiceIdResolverTestSuite) TestResolvePodToServiceIdentity_ExecutionOwner() {
+	podName := "execution-pod-12345"
+	podNamespace := "canalflow-namespace"
+	executionName := "my-execution"
+
+	myPod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName,
+			Namespace: podNamespace,
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					Kind:       "Execution",
+					Name:       executionName,
+					APIVersion: "canalflow.io/v1alpha1",
+				},
+			},
+		},
+	}
+
+	executionAsObject := unstructured.Unstructured{}
+	executionAsObject.SetName(executionName)
+	executionAsObject.SetNamespace(podNamespace)
+	executionAsObject.SetKind("Execution")
+	executionAsObject.SetAPIVersion("canalflow.io/v1alpha1")
+
+	emptyObject := &unstructured.Unstructured{}
+	emptyObject.SetKind("Execution")
+	emptyObject.SetAPIVersion("canalflow.io/v1alpha1")
+	s.Client.EXPECT().Get(gomock.Any(), types.NamespacedName{Name: executionName, Namespace: podNamespace}, emptyObject).Do(
+		func(_ context.Context, _ types.NamespacedName, obj *unstructured.Unstructured, _ ...any) error {
+			executionAsObject.DeepCopyInto(obj)
+			return nil
+		})
+
+	service, err := s.Resolver.ResolvePodToServiceIdentity(context.Background(), &myPod)
+	s.Require().NoError(err)
+	s.Require().Equal("execution", service.Name)
+	s.Require().Equal("Execution", service.Kind)
+}
+
+func (s *ServiceIdResolverTestSuite) TestResolvePodToServiceIdentity_WorkflowOwner() {
+	podName := "workflow-pod-12345"
+	podNamespace := "argo-namespace"
+	workflowName := "my-workflow"
+
+	myPod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName,
+			Namespace: podNamespace,
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					Kind:       "Workflow",
+					Name:       workflowName,
+					APIVersion: "argoproj.io/v1alpha1",
+				},
+			},
+		},
+	}
+
+	workflowAsObject := unstructured.Unstructured{}
+	workflowAsObject.SetName(workflowName)
+	workflowAsObject.SetNamespace(podNamespace)
+	workflowAsObject.SetKind("Workflow")
+	workflowAsObject.SetAPIVersion("argoproj.io/v1alpha1")
+
+	emptyObject := &unstructured.Unstructured{}
+	emptyObject.SetKind("Workflow")
+	emptyObject.SetAPIVersion("argoproj.io/v1alpha1")
+	s.Client.EXPECT().Get(gomock.Any(), types.NamespacedName{Name: workflowName, Namespace: podNamespace}, emptyObject).Do(
+		func(_ context.Context, _ types.NamespacedName, obj *unstructured.Unstructured, _ ...any) error {
+			workflowAsObject.DeepCopyInto(obj)
+			return nil
+		})
+
+	service, err := s.Resolver.ResolvePodToServiceIdentity(context.Background(), &myPod)
+	s.Require().NoError(err)
+	s.Require().Equal("argo-workflow", service.Name)
+	s.Require().Equal("Workflow", service.Kind)
+}
+
+func (s *ServiceIdResolverTestSuite) TestResolvePodToServiceIdentity_SparkApplicationOwner() {
+	podName := "spark-pod-12345"
+	podNamespace := "spark-namespace"
+	sparkAppName := "my-spark-app"
+
+	myPod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName,
+			Namespace: podNamespace,
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					Kind:       "SparkApplication",
+					Name:       sparkAppName,
+					APIVersion: "sparkoperator.k8s.io/v1beta2",
+				},
+			},
+		},
+	}
+
+	sparkAsObject := unstructured.Unstructured{}
+	sparkAsObject.SetName(sparkAppName)
+	sparkAsObject.SetNamespace(podNamespace)
+	sparkAsObject.SetKind("SparkApplication")
+	sparkAsObject.SetAPIVersion("sparkoperator.k8s.io/v1beta2")
+
+	emptyObject := &unstructured.Unstructured{}
+	emptyObject.SetKind("SparkApplication")
+	emptyObject.SetAPIVersion("sparkoperator.k8s.io/v1beta2")
+	s.Client.EXPECT().Get(gomock.Any(), types.NamespacedName{Name: sparkAppName, Namespace: podNamespace}, emptyObject).Do(
+		func(_ context.Context, _ types.NamespacedName, obj *unstructured.Unstructured, _ ...any) error {
+			sparkAsObject.DeepCopyInto(obj)
+			return nil
+		})
+
+	service, err := s.Resolver.ResolvePodToServiceIdentity(context.Background(), &myPod)
+	s.Require().NoError(err)
+	s.Require().Equal("spark", service.Name)
+	s.Require().Equal("SparkApplication", service.Kind)
+}
+
+func (s *ServiceIdResolverTestSuite) TestResolvePodToServiceIdentity_RunnerDeploymentOwner() {
+	podName := "runner-pod-12345"
+	podNamespace := "actions-namespace"
+	runnerDeploymentName := "my-runner-deployment"
+
+	myPod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName,
+			Namespace: podNamespace,
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					Kind:       "RunnerDeployment",
+					Name:       runnerDeploymentName,
+					APIVersion: "actions.summerwind.dev/v1alpha1",
+				},
+			},
+		},
+	}
+
+	runnerAsObject := unstructured.Unstructured{}
+	runnerAsObject.SetName(runnerDeploymentName)
+	runnerAsObject.SetNamespace(podNamespace)
+	runnerAsObject.SetKind("RunnerDeployment")
+	runnerAsObject.SetAPIVersion("actions.summerwind.dev/v1alpha1")
+
+	emptyObject := &unstructured.Unstructured{}
+	emptyObject.SetKind("RunnerDeployment")
+	emptyObject.SetAPIVersion("actions.summerwind.dev/v1alpha1")
+	s.Client.EXPECT().Get(gomock.Any(), types.NamespacedName{Name: runnerDeploymentName, Namespace: podNamespace}, emptyObject).Do(
+		func(_ context.Context, _ types.NamespacedName, obj *unstructured.Unstructured, _ ...any) error {
+			runnerAsObject.DeepCopyInto(obj)
+			return nil
+		})
+
+	service, err := s.Resolver.ResolvePodToServiceIdentity(context.Background(), &myPod)
+	s.Require().NoError(err)
+	s.Require().Equal("actions-runner", service.Name)
+	s.Require().Equal("RunnerDeployment", service.Kind)
+}
+
+func (s *ServiceIdResolverTestSuite) TestResolvePodToServiceIdentity_ServiceOwner() {
+	podName := "service-pod-12345"
+	podNamespace := "service-namespace"
+	serviceName := "my-service"
+
+	myPod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName,
+			Namespace: podNamespace,
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					Kind:       "Service",
+					Name:       serviceName,
+					APIVersion: "v1",
+				},
+			},
+		},
+	}
+
+	serviceAsObject := unstructured.Unstructured{}
+	serviceAsObject.SetName(serviceName)
+	serviceAsObject.SetNamespace(podNamespace)
+	serviceAsObject.SetKind("Service")
+	serviceAsObject.SetAPIVersion("v1")
+
+	emptyObject := &unstructured.Unstructured{}
+	emptyObject.SetKind("Service")
+	emptyObject.SetAPIVersion("v1")
+	s.Client.EXPECT().Get(gomock.Any(), types.NamespacedName{Name: serviceName, Namespace: podNamespace}, emptyObject).Do(
+		func(_ context.Context, _ types.NamespacedName, obj *unstructured.Unstructured, _ ...any) error {
+			serviceAsObject.DeepCopyInto(obj)
+			return nil
+		})
+
+	service, err := s.Resolver.ResolvePodToServiceIdentity(context.Background(), &myPod)
+	s.Require().NoError(err)
+	s.Require().Equal(serviceName, service.Name)
+	// Service kind should include API group to disambiguate from core Service
+	s.Require().Equal("Service.", service.Kind)
+}
+
 func (s *ServiceIdResolverTestSuite) TestUserSpecifiedAnnotationForServiceName() {
 	annotationName := "coolAnnotationName"
 	expectedEnvVarName := "OTTERIZE_SERVICE_NAME_OVERRIDE_ANNOTATION"
