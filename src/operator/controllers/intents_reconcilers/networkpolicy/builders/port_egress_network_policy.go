@@ -54,7 +54,9 @@ func (r *PortEgressRulesBuilder) buildEgressRulesFromEffectivePolicy(ctx context
 				return nil, errors.Wrap(err)
 			}
 		} else {
-			return nil, errors.Errorf("service %s/%s has no selector", svc.Namespace, svc.Name)
+			// Services without selectors (e.g., ExternalName services) don't route to pods
+			// Skip creating egress rules for them
+			continue
 		}
 		egressRules = append(egressRules, egressRule)
 	}

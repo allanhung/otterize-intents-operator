@@ -101,7 +101,9 @@ func ServiceIdentityToLabelsForWorkloadSelection(ctx context.Context, k8sClient 
 			return nil, false, errors.Wrap(err)
 		}
 		if svc.Spec.Selector == nil {
-			return nil, false, errors.Errorf("service %s/%s has no selector", svc.Namespace, svc.Name)
+			// Services without selectors (e.g., ExternalName services) don't select pods
+			// Return false to indicate no labels available, similar to NotFound case
+			return nil, false, nil
 		}
 		return maps.Clone(svc.Spec.Selector), true, nil
 	}
