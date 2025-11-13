@@ -9,6 +9,7 @@ import (
 	"github.com/otterize/intents-operator/src/shared/injectablerecorder"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	v1 "k8s.io/api/networking/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -117,30 +118,57 @@ func (r *PortEgressRulesBuilder) collectIpsFromSVC(ctx context.Context, svc *cor
 		ipAddresses = append(ipAddresses, svc.Spec.ClusterIPs...)
 	}
 
-	var endpoint corev1.Endpoints
-	err := r.Client.Get(ctx, types.NamespacedName{Name: svc.Name, Namespace: svc.Namespace}, &endpoint)
+	// Use EndpointSlice API instead of deprecated Endpoints API
+	endpointSliceList := &discoveryv1.EndpointSliceList{}
+	err := r.Client.List(ctx, endpointSliceList,
+		client.InNamespace(svc.Namespace),
+		client.MatchingLabels{discoveryv1.LabelServiceName: svc.Name})
 	if err != nil {
 		return v1.NetworkPolicyEgressRule{}, errors.Wrap(err)
 	}
 
-	if len(endpoint.Subsets) == 0 {
-		return v1.NetworkPolicyEgressRule{}, errors.Errorf("no endpoints found for service %s/%s", svc.Namespace, svc.Name)
+	if len(endpointSliceList.Items) == 0 {
+		return v1.NetworkPolicyEgressRule{}, errors.Errorf("no endpoint slices found for service %s/%s", svc.Namespace, svc.Name)
 	}
 
-	for _, subset := range endpoint.Subsets {
-		for _, address := range subset.Addresses {
-			ipAddresses = append(ipAddresses, address.IP)
+	portSet := make(map[string]v1.NetworkPolicyPort) // Use map to deduplicate ports
+	hasEndpoints := false
+
+	for _, endpointSlice := range endpointSliceList.Items {
+		// Collect addresses from each endpoint
+		for _, endpoint := range endpointSlice.Endpoints {
+			if endpoint.Conditions.Ready != nil && !*endpoint.Conditions.Ready {
+				continue // Skip non-ready endpoints
+			}
+			for _, address := range endpoint.Addresses {
+				ipAddresses = append(ipAddresses, address)
+				hasEndpoints = true
+			}
 		}
-		for _, port := range subset.Ports {
-			ports = append(ports, v1.NetworkPolicyPort{
-				Port:     &intstr.IntOrString{IntVal: port.Port},
-				Protocol: lo.ToPtr(port.Protocol),
-			})
+
+		// Collect ports (ports are at EndpointSlice level, not per endpoint)
+		for _, port := range endpointSlice.Ports {
+			if port.Port != nil {
+				key := fmt.Sprintf("%d-%s", *port.Port, lo.FromPtrOr(port.Protocol, corev1.ProtocolTCP))
+				portSet[key] = v1.NetworkPolicyPort{
+					Port:     &intstr.IntOrString{IntVal: *port.Port},
+					Protocol: port.Protocol,
+				}
+			}
 		}
+	}
+
+	if !hasEndpoints {
+		return v1.NetworkPolicyEgressRule{}, errors.Errorf("no ready endpoints found for service %s/%s", svc.Namespace, svc.Name)
+	}
+
+	// Convert port map to slice
+	for _, port := range portSet {
+		ports = append(ports, port)
 	}
 
 	if len(ipAddresses) == 0 {
-		return v1.NetworkPolicyEgressRule{}, errors.Errorf("no endpoints found for service %s/%s", svc.Namespace, svc.Name)
+		return v1.NetworkPolicyEgressRule{}, errors.Errorf("no endpoint addresses found for service %s/%s", svc.Namespace, svc.Name)
 	}
 
 	podSelectorEgressRule := v1.NetworkPolicyEgressRule{}
