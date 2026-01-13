@@ -122,6 +122,26 @@ func resolvePodToServiceIdentity(ctx context.Context, k8sClient client.Client, p
 	// Apply special service name mappings for specific workload types.
 	// These standardized names provide consistent identity across different instances of these workload types.
 	switch ownerKind {
+	case "Pod":
+		// Airbyte worker pods get standardized names based on their pod name patterns
+		// to provide consistent policy application across different job instances
+		podName := pod.Name
+		switch {
+		case strings.HasPrefix(podName, "source-declarative-manifest-check-"):
+			otterizeServiceName = "airbyte-source-declarative-manifest-check"
+		case strings.HasPrefix(podName, "replication-job-"):
+			otterizeServiceName = "airbyte-replication-job"
+		case strings.HasPrefix(podName, "source-") && strings.Contains(podName, "-check-"):
+			otterizeServiceName = "airbyte-source-check"
+		case strings.HasPrefix(podName, "destination-") && strings.Contains(podName, "-check-"):
+			otterizeServiceName = "airbyte-destination-check"
+		case strings.HasPrefix(podName, "source-") && strings.Contains(podName, "-discover-"):
+			otterizeServiceName = "airbyte-source-discover"
+		case strings.HasPrefix(podName, "source-") && strings.Contains(podName, "-spec-"):
+			otterizeServiceName = "airbyte-source-spec"
+		case strings.HasPrefix(podName, "normalization-"):
+			otterizeServiceName = "airbyte-normalization"
+		}
 	case "Execution":
 		// Canalflow execution pods get a standardized name for consistent policy application
 		// across different execution instances
