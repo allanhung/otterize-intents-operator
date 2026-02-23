@@ -49,10 +49,6 @@ func (si ServiceIdentity) GetNameWithKind() string {
 	return lo.Ternary(si.Kind == "" || si.Kind == KindOtterizeLegacy, si.Name, fmt.Sprintf("%s-%s", si.Name, strings.ToLower(si.Kind)))
 }
 
-func (si ServiceIdentity) GetRFC1123Name() string {
-	return strings.ReplaceAll(si.Name, "_", ".")
-}
-
 func (si ServiceIdentity) GetRFC1123NameWithKind() string {
 	return strings.ReplaceAll(si.GetNameWithKind(), "_", ".")
 }
