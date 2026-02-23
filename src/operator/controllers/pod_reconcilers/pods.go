@@ -356,7 +356,7 @@ func appendCalls(client serviceidentity.ServiceIdentity, intentsFromCRD []otteri
 	if len(intentsFromCRD) == 0 && len(intentsFromAnnotation) > 0 {
 		clientIntent := otterizev2alpha1.ClientIntents{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      client.Name,
+				Name:      client.GetRFC1123Name(),
 				Namespace: client.Namespace,
 			},
 			Spec: &otterizev2alpha1.IntentsSpec{

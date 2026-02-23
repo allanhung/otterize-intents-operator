@@ -2,7 +2,7 @@ ARG ARCH="amd64"
 ARG OS="linux"
 
 FROM golang:1.23 AS build
-ARG OIO_VERSIONTAG=26.1.1300
+ARG OIO_VERSIONTAG=26.2.2300
 ENV CGO_ENABLED=0
 RUN apt-get update && apt-get install -y patch
 RUN mkdir -p /go/src/github.com/otterize
