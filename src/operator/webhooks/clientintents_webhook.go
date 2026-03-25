@@ -21,6 +21,7 @@ import (
 	"fmt"
 	otterizev1alpha2 "github.com/otterize/intents-operator/src/operator/api/v1alpha2"
 	"github.com/otterize/intents-operator/src/shared/errors"
+	"golang.org/x/net/idna"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -30,6 +31,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 	"strings"
+)
+
+var idnaProfile = idna.New(
+	idna.StrictDomainName(false),
+	idna.MapForLookup(),
 )
 
 type IntentsValidator struct {
