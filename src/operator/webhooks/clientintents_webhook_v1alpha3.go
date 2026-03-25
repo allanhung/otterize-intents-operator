@@ -21,7 +21,6 @@ import (
 	"fmt"
 	otterizev1alpha3 "github.com/otterize/intents-operator/src/operator/api/v1alpha3"
 	"github.com/otterize/intents-operator/src/shared/errors"
-	"golang.org/x/net/idna"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -177,7 +176,7 @@ func (v *IntentsValidatorV1alpha3) validateSpec(intents *otterizev1alpha3.Client
 				}
 			}
 			for _, dns := range intent.Internet.Domains {
-				_, err := idna.Lookup.ToASCII(dns)
+				_, err := idnaProfile.ToASCII(dns)
 				if err != nil && !strings.HasPrefix(dns, "*") {
 					return &field.Error{
 						Type:     field.ErrorTypeInvalid,
