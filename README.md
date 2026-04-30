@@ -302,6 +302,33 @@ source pods would be able to access all 3 target pods.
 Pod identities can be overridden by setting the value of the custom annotation `intents.otterize.com/service-name`
 to the desired service name. This is useful, for example, for pods without any owner.
 
+### Custom Service Name Mappings
+
+Pod identities can also be configured dynamically by mounting a `ConfigMap` to `/etc/otterize/config.yaml` containing the `serviceNameMappings` configuration. This allows you to override identities based on pod name prefixes, substrings, or by extracting the value from specific pod labels.
+
+Example configuration:
+
+```yaml
+serviceNameMappings:
+  Pod:
+    # Match by prefix and extract identity from a label
+    - prefix: "my-custom-app-"
+      extractLabel: "app.kubernetes.io/name"
+    
+    # Match by substring (contains) and assign a fixed identity
+    - contains: "-check-"
+      serviceName: "airbyte-source-check"
+
+    # Match by BOTH prefix and substring, assigning a fixed identity
+    - prefix: "source-"
+      contains: "-discover-"
+      serviceName: "airbyte-source-discover"
+
+    # Match by prefix and assign a fixed identity
+    - prefix: "source-declarative-manifest-check-"
+      serviceName: "airbyte-source-declarative-manifest-check"
+```
+
 ## Bootstrapping
 
 To bootstrap client intents files for the services running in your cluster, you can use the [Otterize network
