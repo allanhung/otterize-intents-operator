@@ -11,7 +11,17 @@ const (
 	ServiceNameOverrideAnnotationDeprecated  = "intents.otterize.com/service-name"
 	UseImageNameForServiceIDForJobs          = "use-image-name-for-service-id-for-jobs"
 	EnvPrefix                                = "OTTERIZE"
+	ServiceNameMappingsKey                   = "serviceNameMappings"
 )
+
+type ServiceNameMappingRule struct {
+	Prefix       string `mapstructure:"prefix"`
+	Contains     string `mapstructure:"contains"`
+	ServiceName  string `mapstructure:"serviceName"`
+	ExtractLabel string `mapstructure:"extractLabel"`
+}
+
+type ServiceNameMappings map[string][]ServiceNameMappingRule
 
 func init() {
 	viper.SetDefault(WorkloadNameOverrideAnnotationKey, WorkloadNameOverrideAnnotationKeyDefault)
