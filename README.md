@@ -304,7 +304,7 @@ to the desired service name. This is useful, for example, for pods without any o
 
 ### Custom Service Name Mappings
 
-Pod identities can also be configured dynamically by mounting a `ConfigMap` to `/etc/otterize/config.yaml` containing the `serviceNameMappings` configuration. This allows you to override identities based on pod name prefixes, substrings, or by extracting the value from specific pod labels.
+Pod identities can also be configured dynamically by mounting a `ConfigMap` to `/etc/otterize/config.yaml` containing the `serviceNameMappings` configuration. This allows you to override identities based on pod name prefixes, postfixes, substrings, or by extracting the value from specific pod labels.
 
 Example configuration:
 
@@ -318,6 +318,10 @@ serviceNameMappings:
     # Match by substring (contains) and assign a fixed identity
     - contains: "-check-"
       serviceName: "airbyte-source-check"
+
+    # Match by postfix and assign a fixed identity
+    - postfix: "-backend"
+      serviceName: "my-backend-service"
 
     # Match by BOTH prefix and substring, assigning a fixed identity
     - prefix: "source-"

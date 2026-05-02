@@ -17,6 +17,7 @@ const (
 type ServiceNameMappingRule struct {
 	Prefix       string `mapstructure:"prefix"`
 	Contains     string `mapstructure:"contains"`
+	Postfix      string `mapstructure:"postfix"`
 	ServiceName  string `mapstructure:"serviceName"`
 	ExtractLabel string `mapstructure:"extractLabel"`
 }
