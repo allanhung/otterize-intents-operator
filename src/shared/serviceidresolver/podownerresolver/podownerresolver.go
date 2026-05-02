@@ -127,7 +127,7 @@ func resolvePodToServiceIdentity(ctx context.Context, k8sClient client.Client, p
 	}
 
 	podName := pod.Name
-	if rules, ok := mappings[ownerKind]; ok {
+	if rules, ok := mappings[strings.ToLower(ownerKind)]; ok {
 		for _, rule := range rules {
 			// Check if rule matches
 			match := true
@@ -135,6 +135,9 @@ func resolvePodToServiceIdentity(ctx context.Context, k8sClient client.Client, p
 				match = false
 			}
 			if rule.Contains != "" && !strings.Contains(podName, rule.Contains) {
+				match = false
+			}
+			if rule.Postfix != "" && !strings.HasSuffix(podName, rule.Postfix) {
 				match = false
 			}
 
