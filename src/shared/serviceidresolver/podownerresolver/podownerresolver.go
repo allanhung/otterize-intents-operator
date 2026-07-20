@@ -126,18 +126,17 @@ func resolvePodToServiceIdentity(ctx context.Context, k8sClient client.Client, p
 		logrus.WithError(err).Error("Failed to unmarshal service name mappings")
 	}
 
-	podName := pod.Name
 	if rules, ok := mappings[strings.ToLower(ownerKind)]; ok {
 		for _, rule := range rules {
 			// Check if rule matches
 			match := true
-			if rule.Prefix != "" && !strings.HasPrefix(podName, rule.Prefix) {
+			if rule.Prefix != "" && !strings.HasPrefix(resourceName, rule.Prefix) {
 				match = false
 			}
-			if rule.Contains != "" && !strings.Contains(podName, rule.Contains) {
+			if rule.Contains != "" && !strings.Contains(resourceName, rule.Contains) {
 				match = false
 			}
-			if rule.Postfix != "" && !strings.HasSuffix(podName, rule.Postfix) {
+			if rule.Postfix != "" && !strings.HasSuffix(resourceName, rule.Postfix) {
 				match = false
 			}
 
